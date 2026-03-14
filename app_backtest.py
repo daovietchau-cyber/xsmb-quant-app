@@ -7,20 +7,17 @@ import re
 from datetime import datetime, time
 
 # ==========================================
-# 1. KẾT NỐI HỆ THỐNG
+# 1. CẤU HÌNH & PHONG CÁCH (CSS)
 # ==========================================
 st.set_page_config(page_title="Hệ Thống Chỉ Huy XSMB", layout="wide")
 
-# CSS để phóng to cỡ chữ toàn hệ thống và tùy chỉnh màu sắc
 st.markdown("""
     <style>
-    html, body, [class*="css"]  {
-        font-size: 20px !important;
-    }
-    .dai-bang { color: #FF8C00; font-weight: bold; font-size: 24px; }
-    .rua { color: #1E90FF; font-weight: bold; font-size: 24px; }
-    .stMetric label { font-size: 20px !important; }
-    .stMetric div { font-size: 30px !important; }
+    .reportview-container .main .block-container { font-size: 22px !important; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
+    /* Màu sắc đặc trưng cho Chỉ huy */
+    .orange-text { color: #FF8C00; font-weight: bold; }
+    .blue-text { color: #1E90FF; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -31,7 +28,7 @@ def get_client():
     key_dict = json.loads(st.secrets["gcp_service_account"]["json_key"], strict=False)
     return gspread.authorize(Credentials.from_service_account_info(key_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def load_data():
     client = get_client()
     sh = client.open_by_url(SHEET_URL)
@@ -40,7 +37,6 @@ def load_data():
     df_db = pd.DataFrame(all_db[1:], columns=all_db[0])
     df_db['Date_Obj'] = pd.to_datetime(df_db['Ngày'], dayfirst=True, errors='coerce')
     df_db = df_db.dropna(subset=['Date_Obj']).sort_values('Date_Obj').reset_index(drop=True)
-    
     ws_kt = sh.worksheet("KeToan")
     df_kt = pd.DataFrame(ws_kt.get_all_values()[1:], columns=ws_kt.get_all_values()[0])
     return df_db, df_kt
@@ -48,9 +44,9 @@ def load_data():
 df, df_ketoan = load_data()
 
 # ==========================================
-# 2. BỘ NÃO QUANT & GỢI Ý
+# 2. BỘ NÃO QUANT & PHÂN LOẠI
 # ==========================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def get_suggestions(df_in):
     day_strs, day_sets, gan_tracker = [], [], {str(i).zfill(2): 0 for i in range(100)}
     gap_cts = {str(i).zfill(2): {g: 0 for g in range(16)} for i in range(100)}
@@ -83,7 +79,7 @@ def get_suggestions(df_in):
         for g in range(16):
             p = gap_cts[num][g] / max(1, total_hits[num])
             if p > max_p: max_p = p; best_g = g
-        results.append({"Số": num, "Gan": curr_g, "DNA": best_g, "Loại": "Đại Bàng" if curr_g == best_g else "Rùa"})
+        results.append({"Số": num, "Gan": curr_g, "DNA": best_g, "Loại": "🦅 ĐẠI BÀNG" if curr_g == best_g else "🐢 RÙA"})
     return results
 
 suggestions = get_suggestions(df)
@@ -91,62 +87,78 @@ suggestions = get_suggestions(df)
 # ==========================================
 # 3. GIAO DIỆN ĐIỀU HÀNH CHIẾN THUẬT
 # ==========================================
-st.sidebar.markdown(f"## 📊 Dữ liệu: {len(df)} ngày")
 now = datetime.now()
 is_before_cutoff = now.time() < time(18, 0)
 
-# Khởi tạo trạng thái checkbox nếu chưa có
-if 'check_all' not in st.session_state: st.session_state.check_all = True
+# Khởi tạo trạng thái chọn riêng biệt
+if 'selected_nums' not in st.session_state:
+    st.session_state.selected_nums = [s['Số'] for s in suggestions]
 
 tab1, tab2 = st.tabs(["🚀 LỆNH TẤN CÔNG", "📥 NHẬP KẾ QUẢ"])
 
 with tab1:
-    st.header("🦅 Bảng Chốt Số (Cỡ chữ lớn)")
+    st.header("🦅 Bảng Điều Phối Lệnh")
     
-    # Nút Check All / Uncheck All
-    c_btn1, c_btn2 = st.columns(2)
-    if c_btn1.button("✅ Chọn tất cả"): st.session_state.check_all = True; st.rerun()
-    if c_btn2.button("❌ Bỏ chọn tất cả"): st.session_state.check_all = False; st.rerun()
+    # --- CỤM 4 NÚT ĐIỀU KHIỂN BIỆT LẬP ---
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("🦅 Chọn Hết Đ.Bàng"):
+        db_nums = [s['Số'] for s in suggestions if "ĐẠI BÀNG" in s['Loại']]
+        st.session_state.selected_nums = list(set(st.session_state.selected_nums + db_nums))
+        st.rerun()
+    if c2.button("🚫 Bỏ Hết Đ.Bàng"):
+        st.session_state.selected_nums = [n for n in st.session_state.selected_nums if n not in [s['Số'] for s in suggestions if "ĐẠI BÀNG" in s['Loại']]]
+        st.rerun()
+    if c3.button("🐢 Chọn Hết Rùa"):
+        r_nums = [s['Số'] for s in suggestions if "RÙA" in s['Loại']]
+        st.session_state.selected_nums = list(set(st.session_state.selected_nums + r_nums))
+        st.rerun()
+    if c4.button("🚫 Bỏ Hết Rùa"):
+        st.session_state.selected_nums = [n for n in st.session_state.selected_nums if n not in [s['Số'] for s in suggestions if "RÙA" in s['Loại']]]
+        st.rerun()
 
-    input_data = []
+    # Chuẩn bị dữ liệu hiển thị
+    display_data = []
     for s in suggestions:
-        color_class = "dai-bang" if s['Loại'] == "Đại Bàng" else "rua"
-        input_data.append({
-            "Chọn": st.session_state.check_all,
+        display_data.append({
+            "Chọn": s['Số'] in st.session_state.selected_nums,
             "Số": s['Số'],
-            "Loại": s['Loại'],
-            "Điểm": 20 if s['Loại'] == "Đại Bàng" else 10,
-            "Phân tích": f"Gan {s['Gan']} (Đỉnh {s['DNA']})"
+            "Loại Chiến Thuật": s['Loại'],
+            "Điểm Đề Xuất": 20 if "ĐẠI BÀNG" in s['Loại'] else 10,
+            "Trạng thái": f"Gan {s['Gan']} (Đỉnh {s['DNA']})"
         })
     
-    if input_data:
-        # Hiển thị bảng màu sắc
-        edited_df = st.data_editor(pd.DataFrame(input_data), use_container_width=True, hide_index=True)
+    if display_data:
+        # Bảng chỉnh sửa trực tiếp
+        df_display = pd.DataFrame(display_data)
+        edited_df = st.data_editor(df_display, use_container_width=True, hide_index=True, key="main_editor")
         
-        # Tạo lệnh Copy-Paste cấu trúc: sốxđiểm, sốxđiểm
+        # Cập nhật lại session_state từ bảng editor
+        st.session_state.selected_nums = edited_df[edited_df['Chọn'] == True]['Số'].tolist()
+        
+        # Tạo lệnh dán Web
         picks = edited_df[edited_df['Chọn'] == True]
-        cmd_text = ", ".join([f"{r['Số']}x{r['Điểm']}" for _, r in picks.iterrows()])
+        cmd_text = ", ".join([f"{r['Số']}x{r['Điểm Đề Xuất']}" for _, r in picks.iterrows()])
         
-        st.subheader("📋 Lệnh dán Web cá cược")
-        st.code(cmd_text, language="text") # Click 1 nhát vào icon góc phải để copy
+        st.markdown("### 📋 Lệnh Copy-Paste cho Web")
+        st.code(cmd_text, language="text")
 
-        if st.button("🔥 LƯU LỊCH SỬ CHỐT SỐ", type="primary"):
+        if st.button("🔥 XÁC NHẬN CHỐT LỆNH LÊN CLOUD", type="primary"):
             if is_before_cutoff:
                 ws_kt = get_client().open_by_url(SHEET_URL).worksheet("KeToan")
                 for _, r in picks.iterrows():
-                    ws_kt.append_row([now.strftime("%d-%m-%Y"), r['Số'], r['Điểm'], r['Điểm']*23000, 0, 0, "⏳ Đang đánh"])
-                st.success("Đã chốt lệnh thành công!")
-            else: st.error("Đã quá 18:00 - Không thể lưu thêm.")
+                    ws_kt.append_row([now.strftime("%d-%m-%Y"), r['Số'], r['Điểm Đề Xuất'], r['Điểm Đề Xuất']*23000, 0, 0, "⏳ Đang đánh"])
+                st.success("Đã ghi lịch sử chốt số!")
+            else: st.error("Đã qua 18h00 - Lệnh không được ghi nhận.")
 
 with tab2:
-    st.subheader("📥 Cập nhật KQXS & Quyết toán")
-    txt = st.text_area("Dán 27 giải:")
-    if st.button("Đồng bộ & Quyết toán tiền"):
+    st.subheader("📥 Cập nhật KQXS & Đối soát")
+    txt = st.text_area("Dán 27 giải hôm nay:")
+    if st.button("Đồng bộ & Tính tiền lãi"):
         nums = re.findall(r'\d+', txt)
         if len(nums) >= 27:
-            ws_db = get_client().open_by_url(SHEET_URL).worksheet("Database")
-            ws_db.append_row([now.strftime("%d-%m-%Y"), "," + ",".join(nums[:27]) + ",", "27"])
-            
+            # Lưu DB
+            get_client().open_by_url(SHEET_URL).worksheet("Database").append_row([now.strftime("%d-%m-%Y"), "," + ",".join(nums[:27]) + ",", "27"])
+            # Đối soát
             ws_kt = get_client().open_by_url(SHEET_URL).worksheet("KeToan")
             records = ws_kt.get_all_values()
             l2 = [n[-2:] for n in nums]
@@ -157,4 +169,4 @@ with tab2:
                     ws_kt.update_cell(i+1, 5, thu)
                     ws_kt.update_cell(i+1, 6, thu - int(row[3]))
                     ws_kt.update_cell(i+1, 7, f"✅ Ăn {hits}" if hits > 0 else "❌ Trượt")
-            st.cache_data.clear(); st.success("Xong!"); st.rerun()
+            st.cache_data.clear(); st.success("Hoàn tất đối soát!"); st.rerun()
